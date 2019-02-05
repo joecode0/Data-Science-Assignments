@@ -1,0 +1,570 @@
+% Note: this file can be compiled on its own, but is also included by
+% diss.tex (using the docmute.sty package to ignore the preamble)
+\documentclass[12pt,a4paper,twoside]{article}
+\usepackage[pdfborder={0 0 0}]{hyperref}
+\usepackage[margin=25mm]{geometry}
+\usepackage{graphicx}
+\usepackage{parskip}
+\usepackage{titletoc}
+\usepackage{memhfixc}
+\usepackage{minted}
+\begin{document}
+\vspace*{\fill}
+\begin{center}
+\Large
+Computer Science Tripos -- Part II -- Data Science Practical 5\\[4mm]
+\bigskip
+\bigskip
+\bigskip
+\bigskip
+\LARGE
+Predicting Income using the Census-Income (KDD) Data Set\\[4mm]
+\large
+\bigskip
+\bigskip
+\bigskip
+\bigskip
+Joseph Marchant (jm2129)
+
+Robinson College
+
+28 November 2018
+\end{center}
+
+\vspace{\fill}
+
+% Main document
+\newpage
+
+\section*{Data Exploration}
+
+\subsection*{Initial Look}
+
+Running some typical general data analysis functions gave me some initial insights:
+
+\begin{minted}{python}
+census.head()
+census.info()
+census.describe()
+\end{minted}
+
+Here we learn the number of columns (42), entries (37382), and the types of each entry. We can also see that numerous columns (such as 'class of worker' and 'reason for unemployment') have various missing values. Additionally, we have information of min, average and max values for the numerical columns. These min and max values made it clear that some sort of scaling would be necessary.
+
+The first thing I chose to do was explore each feature individually, as we'd need to handle each in some way. To do this, I did the following things:
+
+\begin{itemize}
+    \item
+    {
+    Investigated the cardinality and spread of each categorical feature using
+    \begin{minted}{python}
+    census[col_name].value_counts()
+    \end{minted}
+    }
+    \item 
+    {
+    Investigated the range and distribution of each numerical feature using:
+    \begin{minted}{python}
+    census[col_name].hist(bins=k)
+    \end{minted}
+    }
+    \item
+    {
+    Use the \textit{census-income.names.txt} file in conjunction with the search feature from \textit{ResearchConnections.org}\footnote{https://www.researchconnections.org/childcare/search/variables?q=SEOTR\&STUDYQ=04559} to extract more information about what each feature represents and how it was collected.
+    }
+\end{itemize}
+
+I repeated each of these steps for every relevant column.
+
+\newpage
+
+\subsection*{Examples and Discussion}
+
+For example, many features had tail heavy distributions such as \textbf{weeks worked in year}:
+
+\begin{figure}[h]
+\includegraphics[width=8cm]{weeks_in_year_worked_dist_plot.png}
+\centering
+\end{figure}
+
+For categorical columns, this process highlighted the need for some feature engineering. For example here are the counts for the categories of \textbf{education}:
+
+\begin{figure}[h]
+\includegraphics[width=8cm]{education_value_counts.png}
+\centering
+\end{figure}
+
+This demonstrates that there are probably more categories than needed. As well as this, some categories contain too few entries, such as \textit{Less than 1st grade}, and therefore grouping similar categories will allow us to minimise total features whilst maintaining the majority of our prediction accuracy. I show an example of how I reduced the cardinality of this feature in the \textbf{Feature Engineering} section.
+
+Some categories even had lots of unknown values, making them potentially worth dropping such as \textbf{migration code-change in reg}:
+
+\begin{figure}[h]
+\includegraphics[width=8cm]{migration_lack_of_values.png}
+\centering
+\end{figure}
+
+\newpage
+
+I also plotted a heat-map of the features containing null entries:
+
+\begin{figure}[h]
+\includegraphics[width=10cm]{null_heat_map.png}
+\centering
+\end{figure}
+
+This implied that various columns needed to either be dropped or filled in. Since each of these were categorical, there were a few options on what could be causing the missing values and therefore how to handle them:
+\begin{enumerate}
+    \item 
+    {
+    The lack of entries could be representative of an extra category. For example, "Not In Universe", which represents when certain people did not fill this question in.
+    }
+    \item
+    {
+    Could have been a data collection error, and we could therefore just fill the remaining values based on the distribution of the values, or similar.
+    }
+    \item
+    {
+    Drop the column.
+    }
+\end{enumerate}
+
+Additionally, some columns were in fact categorical but they had numerical entries. Examples include \textbf{year} and \textbf{own business or self employed}:
+
+\begin{figure}[h]
+\includegraphics[width=8cm]{own_business_int_to_object.png}
+\centering
+\end{figure}
+
+Therefore I would need to cast these to discrete categories because as values, any model built would interpret them as comparable values.
+
+\subsection*{Feature Engineering}
+
+The above exploration and analysis allowed me to decide upon an action for each column, and a reasoning. Here are my conclusions from the analysis, with an action and reasoning assigned to sets of features.
+
+\begin{itemize}
+    \item 
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} No action (note however I do scale these values later).
+        }
+        \item
+        {
+        \textbf{Reasoning:} No missing values, and a numerical column.
+        }
+        \item
+        {
+        \textbf{Features:} age, wage per hour, capital gains, capital losses, dividends from stocks, instance weight, num persons worked for employer, weeks worked in year
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Remove column
+        }
+        \item
+        {
+        \textbf{Reasoning:} Not enough values, or feature not linearly independent from all other data. Or (for race, hispanic origin and sex) we do not want to introduce unethical bias into model.
+        }
+        \item
+        {
+        \textbf{Features:} industry code, occupation code, race, hispanic origin, sex, region of previous residence, state of previous residence, detailed household summary in household, migration code-change in msa, migration code-change in reg, migration code-move within reg, migration prev res in sunbelt, family members under 18, citizenship, fill inc questionnaire for veteran admin
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Fill in missing values with "Not In Universe", and one hot encode result
+        }
+        \item
+        {
+        \textbf{Reasoning:} Documentation implies that missing values represent "Not In Universe", and after this change, feature has few categories.
+        }
+        \item
+        {
+        \textbf{Features:} class of worker, enroll in edu inst last wk, major occupation code, member of a labor union, reason for unemployment
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Reduce cardinality by grouping categories, and one hot encode result
+        }
+        \item
+        {
+        \textbf{Reasoning:} Many categories overlap when considering their relationship to income, and/or some categories have too few occurrences for a one hot encoding to be sensible.
+        }
+        \item
+        {
+        \textbf{Features:} education, marital status, full or part time employment stat, tax filer status, detailed household and family stat
+        }
+        \item
+        {
+        Here are the new education categories after this change:
+        \begin{figure}[h]
+        \includegraphics[width=8cm]{education_new_value_counts.png}
+        \centering
+        \end{figure}
+        }
+    \end{itemize}
+    }
+    \newpage
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Combine columns, and one hot encode result
+        }
+        \item
+        {
+        \textbf{Reasoning:} The features do not hold enough information separately, but combining allows us to encapsulate and separate out the useful information.
+        }
+        \item
+        {
+        \textbf{Features:} country of birth father, country of birth mother, country of birth self
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Convert values to categorical column, then one hot encode
+        }
+        \item
+        {
+        \textbf{Reasoning:} Numerical placeholders have just been used for categories.
+        }
+        \item
+        {
+        \textbf{Features:} own business or self employed, veterans benefits, year, income (note: we do not one hot encode the target variable)
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Just apply one hot encoding
+        }
+        \item
+        {
+        \textbf{Reasoning:} Either few enough categories for just one hot encoding to work well, or none of above actions feasible/ necessary.
+        }
+        \item
+        {
+        \textbf{Features:} major industry code, live in this house 1 year ago
+        }
+    \end{itemize}
+    }
+\end{itemize}
+
+All the code to complete this feature engineering is inside the \textbf{feature\_selection} notebook. After this, the data set consisted of 107 columns.
+
+\subsection*{Feature Selection Using Permutation Importance}
+
+The main advantage to reducing the number of columns is two-fold: Firstly, it improves interpret-ability of the model and results, as each prediction is based on less information. Secondly, it allows our models (especially Neural Networks) to run faster.
+
+In order to further reduce the number of columns, I chose to apply a technique called \textbf{Permutation Importance}. The technique works by building a model, and then for each feature we randomly permute the values in order to evaluate its effect on the prediction. This allows us to rank the features by \textit{Feature Importance}.
+
+I first performed a \textit{StratifiedShuffleSplit} on the data set with a train:test ratio of 4:1. I then applied the \textit{sklearn.preprocessing.StandardScaler} (which performed better than MinMaxScaler by around 1\% on each model) to each data split separately (as in the real world we won't be able to scale inputs by some universal mean and variance etc.).
+
+I then fit the data to a \textit{LogisticRegression} model.
+
+On the training set, this model was already performing well:
+
+\begin{figure}[h]
+    \includegraphics[width=16cm]{log_reg_initial_scores_permutation_importance.png}
+    \centering
+\end{figure}
+
+I then used the \textit{eli5.sklearn} package \textit{PermutationImportance} to rank the features by importance. This returned a table of the following format containing all 107 features:
+
+\begin{figure}[h]
+    \includegraphics[width=14cm]{original_permutation_importance.png}
+    \centering
+\end{figure}
+
+The weights represent how much the prediction \textbf{worsened} after randomly permuting the values for that column. The variation collected from completing this test multiple times is also shown. This ranking of the features showed that a large chunk weren't helping at all with predictions. Some features even predicted more accurately when randomly permuted (demonstrated by a negative weight in the permutation importance table), such as the categories Yes and No from the \textbf{veterans benefits} feature.
+
+Therefore we can see that \textbf{weeks worked in year}, \textbf{wage per hour} and also \textbf{education\_Post-graduates Degree} are the best predictors of income. This is a very intuitive result, as we'd certainly expect those working more weeks with better pay per hour and a higher level of education, to be earning more.
+
+From this and multiple iterations, I was able to confidently remove over half the features without a significant decrease in prediction accuracy. More specifically, the data set was reduced to only contain 51 columns (including the target variable), with the following new performance metrics:
+
+\begin{figure}[h]
+    \includegraphics[width=16cm]{new_permutation_importance.png}
+    \centering
+\end{figure}
+
+\newpage
+
+\section*{ML Algorithms}
+
+Note that the entire finalised data transformation process is stored inside the notebook named \textbf{final\_full\_data\_transformation\_process.ipynb}. To begin, here is the data we have:
+
+\begin{figure}[h]
+    \includegraphics[width=16cm]{train_test_dev_shapes.png}
+    \centering
+\end{figure}
+
+I started by creating a generic evaluation function for comparing ML algorithms. This function predicted on the training set, just to give me an initial idea of which algorithms work best. I then built multiple models and evaluated each:
+
+\begin{itemize}
+    \item 
+    {
+    \textbf{Logistic Regression} with \textit{sklearn.linear\_model.LogisticRegression}
+    
+    \begin{figure}[H]
+    \includegraphics[width=6cm]{log_reg_evaluation.png}
+    \centering
+    \end{figure}
+    }
+    \item 
+    {
+    \textbf{Perceptron} with \textit{sklearn.linear\_model.SGDClassifier}
+    
+    \begin{figure}[H]
+    \includegraphics[width=6cm]{sgd_evaluation.png}
+    \centering
+    \end{figure}
+    }
+    \item 
+    {
+    \textbf{Naive Bayes} with \textit{sklearn.naive\_bayes.GaussianNB}
+    
+    \begin{figure}[H]
+    \includegraphics[width=6cm]{gnb_evaluation.png}
+    \centering
+    \end{figure}
+    }
+    \item 
+    {
+    \textbf{Perceptron with Kernel Trick} with \textit{sklearn.kernel\_approximation.RBFSampler}
+    
+    \begin{figure}[H]
+    \includegraphics[width=6cm]{sgd_rbf_evaluation.png}
+    \centering
+    \end{figure}
+    }
+\end{itemize}
+
+
+This clearly shows that Logistic Regression is by far the best predictor. 
+
+\section*{Further Evaluation of Logistic Regression Model}
+
+After choosing the best model, I decided to evaluate the performance in more depth and begin to think about what sort of predictor we want.
+
+\subsection*{Precision-Recall Curve}
+
+Here is the precision-recall curve for the logistic regression training predictions:
+
+\begin{figure}[H]
+    \includegraphics[width=8cm]{log_reg_precision_recall_curve.png}
+    \centering
+\end{figure}
+
+As you can see, the recall has a general tendency of decreasing when you increase the threshold. I.e. the more conservative the classifier becomes (because we increase the threshold required to predict in the positive direction), the more instances of income=1 it is likely to miss. On the other hand, the precision is the opposite: it has a general tendency of increasing with the threshold. I.e. the riskier the classifier becomes, the higher chance a prediction of income=1 is correct.
+
+\subsection*{Precision vs Recall}
+
+Here is the plot for precision vs recall from the logistic regression prediction:
+
+\begin{figure}[H]
+    \includegraphics[width=8cm]{log_reg_precision_vs_recall.png}
+    \centering
+\end{figure}
+
+This shows a very predictable relationship between precision and recall: As we try to increase the recall, the precision decreases. Therefore the optimal point, in the case where we do not prefer either precision or recall, is easy to identify in the top right of the graph. Additionally, if we decided to increase the beta value for the F\_beta score (in order to put more emphasis on recall than precision) or visa-verse, we'd see this same phenomenon.
+
+\subsection*{The Receiver Operating Characteristic (ROC) curve}
+
+Here is the plot of the ROC curve for the logistic regression predictor:
+
+\begin{figure}[H]
+    \includegraphics[width=8cm]{log_reg_roc_curve.png}
+    \centering
+\end{figure}
+
+Here we see a fairly large \textit{area under the curve (AUC)}, demonstrated by the large "ROC (AUC) score" of 0.9479 with the logistic regression model. Therefore the model predicts more positive values correctly than incorrectly.
+
+\newpage
+
+\subsection*{Neural Networks}
+
+I then decided to try out neural nets using \textit{Tensorflow}. All the models built and tested out are inside the notebook \textbf{census\_data\_models.ipynb}. I tried changing various variables for the network, such as:
+
+\begin{itemize}
+    \item 
+    {
+    Hidden Layer Size (ranging anywhere from 5 upwards)
+    }
+    \item 
+    {
+    Learning Rate (0.05-10)
+    }
+    \item 
+    {
+    Activation Functions
+    \begin{itemize}
+        \item 
+        {
+        \textit{tf.tanh}
+        }
+        \item
+        {
+        \textit{tf.sigmoid}
+        }
+        \item
+        {
+         \textit{tf.nn.relu}
+        }
+        \item
+        {
+         \textit{tf.nn.softmax}
+        }
+    \end{itemize}
+    }
+    \item 
+    {
+    Number of Epochs (ranging anywhere from 50 upwards)
+    }
+    \item 
+    {
+    Dropout chance (0-1)
+    }
+    \item
+    {
+    Optimizers 
+    \begin{itemize}
+        \item 
+        {
+        \textit{tf.train.GradientDescentOptimizer}
+        }
+        \item
+        {
+        \textit{tf.train.AdadeltaOptimizer}
+        }
+        \item
+        {
+         \textit{tf.train.AdamOptimizer}
+        }
+    \end{itemize}
+    }
+\end{itemize}
+
+\subsection*{Best Model}
+
+\begin{itemize}
+    \item 
+    {
+    Hidden Layer Size = 100
+    }
+    \item 
+    {
+    Learning Rate = 0.1
+    }
+    \item 
+    {
+    Activation Function = \textit{tf.tanh}
+    }
+    \item 
+    {
+    Number of Epochs = 100
+    }
+    \item 
+    {
+    Dropout chance = 0.5
+    }
+    \item
+    {
+    Optimizer = \textit{tf.train.AdamOptimizer}
+    }
+\end{itemize}
+
+\newpage
+
+\section*{Evaluation of Best Model}
+
+The model described in the previous section gave the following output (just added test set accuracy for final run, was previously using the dev set to ensure I wasn't overfitting to the training data):
+
+\begin{figure}[H]
+    \includegraphics[width=8cm]{best_nn_results.png}
+    \centering
+\end{figure}
+
+Firstly, there's a large disparity between the accuracy on the training data at the last epoch, and the accuracy on the dev and test sets. This is due to the \textbf{Dropout}. Furthermore, the conditions are different when testing on the training set vs the other sets - namely the dropout chance is set to 0 for the test and dev sets. Therefore we're able to use all the nodes to make a prediction, which vastly improves the accuracy.
+
+Secondly, the number of epochs being low is a way of implementing \textbf{early stopping}. This was because although I could get the training set accuracy as high as 93\%, the dev set would perform much worse at around 86\%. This is due to the NN overfitting to the training data, and therefore by early stopping we don't allow the NN to overfit.
+
+Here are the key evaluation scores on the test set for the final NN:
+
+\begin{figure}[H]
+    \includegraphics[width=8cm]{final_evaluation.png}
+    \centering
+\end{figure}
+
+The accuracy score means that out of all the NN's predictions, 89.00\% of them are correct.
+The precision score shows that out of all the times the NN predicted "income=1" (positive), 83.41\% of them were correct.
+The recall score represents that the percentage of all cases where "income=1" that the NN correctly classified was 83.41\%
+
+The precision score being equal to the recall score implies that the number of \textbf{False Positives (FP)} is equal to the number of \textbf{False Negatives (FN)}. I.e. whenever we get a prediction wrong, there's a 50\% chance it was either a positive or negative prediction.
+
+The preference of precision vs recall would depend on what we use this predictor to do, but as there seems to be no real risk associated with either False Positives (incorrectly predicting someone has a high income) and False Negatives (incorrectly predicting someone has a low income), a good balance between both seems optimal in favour of maximising accuracy.
+
+\section*{Dimensionality Reduction}
+
+This section mixes the use of two dimensionality reduction schemes: \textbf{Principal Components Analysis (PCA)} and \textbf{stochastic neighbourhood embedding with the t distribution (t-SNE)}.
+
+First I began by selecting the numerical features from the dataset.
+
+Using the "median" strategy Imputer (\textit{sklearn.preprocessing.Imputer}) to fill in missing values, and re-scaling the features so they have the same variance, the following plot is produced:
+
+\begin{figure}[H]
+    \includegraphics[width=12cm]{census_pca_income.png}
+    \centering
+\end{figure}
+
+Here we can see that we struggle to separate the income clusters. They overlap a lot, however there is a slight indication of separate clusters formed.
+
+\newpage
+
+Applying t-SNE to the same scenario gives the following plot:
+
+\begin{figure}[H]
+    \includegraphics[width=12cm]{census_tsne_income.png}
+    \centering
+\end{figure}
+
+Again there is a lot of overlap, but this time we seem to have a more promising representation of various clusters.
+
+I then tried each of these plots with various categorical columns, with no luck. The plots still had considerable overlap between categories, for example:
+
+\begin{figure}[H]
+    \includegraphics[width=12cm]{census_pca_tax_filer_status.png}
+    \centering
+\end{figure}
+
+We can also plot the number of principle components against the mean squared error (MSE) for PCA as below:
+
+\begin{figure}[H]
+    \includegraphics[width=12cm]{number_pcas_vs_mse.png}
+    \centering
+\end{figure}
+
+As expected, we see an inverse relationship between MSE and L: as L increases, the MSE decreases. However, the MSE does not decrease as much as we'd hope. I.e. we'd ideally like the MSE to be much lower for when L=2. This is because we'd then be able to predict much more accurately with only 2 principle components, and therefore the graphs above would show clusters more separated with less overlapping. Since this is not the case, 2 principle components simply isn't enough to showcase the clusters in the data well enough.
+
+\end{document}
+
