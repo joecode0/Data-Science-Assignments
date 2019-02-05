@@ -1,0 +1,215 @@
+% Note: this file can be compiled on its own, but is also included by
+% diss.tex (using the docmute.sty package to ignore the preamble)
+\documentclass[12pt,a4paper,twoside]{article}
+\usepackage[pdfborder={0 0 0}]{hyperref}
+\usepackage[margin=25mm]{geometry}
+\usepackage{graphicx}
+\usepackage{parskip}
+\usepackage{titletoc}
+\usepackage{memhfixc}
+\usepackage{minted}
+\begin{document}
+\vspace*{\fill}
+\begin{center}
+\Large
+Computer Science Tripos -- Part II -- Data Science Practical 5\\[4mm]
+\bigskip
+\bigskip
+\bigskip
+\bigskip
+\LARGE
+Predicting Income using the Census-Income (KDD) Data Set\\[4mm]
+\large
+\bigskip
+\bigskip
+\bigskip
+\bigskip
+Joseph Marchant (jm2129)
+
+Robinson College
+
+28 November 2018
+\end{center}
+
+\vspace{\fill}
+
+% Main document
+\newpage
+
+\section*{Introduction}
+
+\emph{This data set contains weighted census data extracted from the 1994 and 1995 current population surveys conducted by the U.S. Census Bureau.\footnote{https://archive.ics.uci.edu/ml/datasets/Census-Income+\%28KDD\%29}}
+
+The task is to build a machine learning pipeline to predict the target value based on the other demographic and employment related variables in the data set. The target value represents the level of income: below \$50K (value 0) or above \$50K (value 1).
+
+The implementation and report should include steps covering data exploration, the implementation of machine learning algorithms, evaluations, visualizations and dimensionality reduction.
+
+
+\section*{Data Exploration}
+
+\subsection*{Initial Look}
+
+Running some typical general data analysis functions gave me some initial insights:
+
+\begin{minted}{python}
+census.head()
+census.info()
+census.describe()
+\end{minted}
+
+Here we learn the number of columns (42), entries (37382), and the types of each entry. We can also see that numerous columns (such as 'class of worker' and 'reason for unemployment') have various missing values. Additionally, we have information of min, average and max values for the numerical columns.
+
+The first thing I chose to do was explore each feature individually, as we'd need to handle each in some way. To do this, I did the following things:
+
+\begin{itemize}
+    \item
+    {
+    Investigated the cardinality and spread of each categorical feature using
+    \begin{minted}{python}
+    census[col_name].value_counts()
+    \end{minted}
+    }
+    \item 
+    {
+    Investigated the range and distribution of each numerical feature using:
+    \begin{minted}{python}
+    census[col_name].hist(bins=k)
+    \end{minted}
+    }
+    \item
+    {
+    Use the \textit{census-income.names.txt} file in conjunction with the search feature from \textit{ResearchConnections.org}\footnote{https://www.researchconnections.org/childcare/search/variables?q=SEOTR\&STUDYQ=04559} to extract more information about what each feature represents and how it was collected.
+    }
+\end{itemize}
+
+\subsection*{Feature Engineering}
+
+This exploration and analysis allowed me to decide upon an action for each column, and a reasoning (a table for all this is stored in \textit{feature\_engineering\_sheet} in the code folder uploaded with my project). I used this to group the features by action and reasoning, as follows:
+
+\begin{itemize}
+    \item 
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} No action
+        }
+        \item
+        {
+        \textbf{Reasoning:} No missing values, and a numerical column.
+        }
+        \item
+        {
+        \textbf{Features:} age, wage per hour, capital gains, capital losses, dividends from stocks, instance weight, num persons worked for employer, weeks worked in year
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Remove column
+        }
+        \item
+        {
+        \textbf{Reasoning:} Not enough values, or feature not linearly independent from all other data. Or (for race, hispanic origin and sex) do not want to introduce unethical bias into model.
+        }
+        \item
+        {
+        \textbf{Features:} industry code, occupation code, race, hispanic origin, sex, region of previous residence, state of previous residence, detailed household summary in household, migration code-change in msa, migration code-change in reg, migration code-move within reg, migration prev res in sunbelt, family members under 18, citizenship, fill inc questionnaire for veteran admin
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Fill in missing values with "Not In Universe", and one hot encode result
+        }
+        \item
+        {
+        \textbf{Reasoning:} Documentation implies that missing values represent "Not In Universe", and after this change, feature has little enough columns for one hot encoding to be feasible.
+        }
+        \item
+        {
+        \textbf{Features:} class of worker, enroll in edu inst last wk, major occupation code, member of a labor union, reason for unemployment
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Reduce cardinality by grouping categories, and one hot encode result
+        }
+        \item
+        {
+        \textbf{Reasoning:} Many categories overlap when considering their relationship to income, and/or some categories have too few values for a one hot encoding to be sensible. After changes, one hot encoding will be suitable.
+        }
+        \item
+        {
+        \textbf{Features:} education, marital status, full or part time employment stat, tax filer status, detailed household and family stat
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Combine columns, and one hot encode result
+        }
+        \item
+        {
+        \textbf{Reasoning:} Don't hold enough information separately, but combining allows us to encapsulate and separate out the useful information.
+        }
+        \item
+        {
+        \textbf{Features:} country of birth father, country of birth mother, country of birth self
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} Convert numeric values to categorical column, then one hot encode
+        }
+        \item
+        {
+        \textbf{Reasoning:} Information not representative of a numerical scale, numerical placeholders have just been used for categories. So better to represent as categories.
+        }
+        \item
+        {
+        \textbf{Features:} own business or self employed, veterans benefits, year, income (note: we do not one hot encode the target variable)
+        }
+    \end{itemize}
+    }
+    \item
+    {
+    \begin{itemize}
+        \item 
+        {
+        \textbf{Action:} One hot encode, and no other actions
+        }
+        \item
+        {
+        \textbf{Reasoning:} Either few enough values for just one hot encoding to work well, or none of above actions sensible/ feasible.
+        }
+        \item
+        {
+        \textbf{Features:} major industry code, live in this house 1 year ago
+        }
+    \end{itemize}
+    }
+\end{itemize}
+
+All the code to complete this feature engineering is inside the \textbf{census\_data\_feature\_selection.ipynb} notebook, with a showcase of the after-changes data set.
+
+
+\end{document}
+
